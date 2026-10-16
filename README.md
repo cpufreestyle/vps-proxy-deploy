@@ -1,81 +1,85 @@
-# VPS 翻墙部署工具
+# 美国云服务器 (AWS / GCP) 科学上网部署指南
 
-在 AWS Lightsail / EC2 或 GCP 上一键部署代理服务，客户端导入链接即可上网。
+用你已有的 AWS / GCP 美国区资源，部署一台 VLESS + XTLS-Vision + Reality 代理服务，
+供电脑 / 手机"上外网"。全程约 15 分钟。
 
-## 文件说明
+> 如果你只是想要一台能访问海外网站的服务器：直接开机即用，不需要本指南。
+> 本指南用于：把这台美国服务器当作代理，给国内或其它网络的设备使用。
 
-- `vps-setup.sh` — 一键部署脚本（Xray-core + VLESS-Reality + BBR）
-- `README.md` — 本文件
+## 1. 选机器
 
-## 部署
+| 平台 | 配置 | 费用 | 说明 |
+| --- | --- | --- | --- |
+| GCP | e2-micro (1C1G/30G) | 永久免费 | 仅限 us-west1 / us-central1 / us-east1 |
+| AWS EC2 | t3.micro (1C1G) | 免费 12 个月, 750 小时/月 | 需在账号创建后 12 个月内 |
+| AWS Lightsail | 1C/512MB 或 1C/1G | $3.5/月起 | 最省心, 含 1TB 月流量 |
 
-SSH 登入服务器后执行：
+- 区域优先美国西海岸: `us-west-1` (俄勒冈) 或 `us-west-2`，国内延迟通常比东海岸低 30-60ms
+- 系统选择 Ubuntu 22.04 LTS
 
-```bash
-sudo bash vps-setup.sh
-```
+## 2. 创建实例
 
-自定义端口和伪装域名（可选）：
+### GCP (推荐, 永久免费)
 
-```bash
-PORT=443 DEST_HOST=www.microsoft.com sudo -E bash vps-setup.sh
-```
+1. 控制台 -> Compute Engine -> VM 实例 -> 创建实例
+2. 区域选 `us-west1-b`，机器类型 `e2-micro`，启动磁盘 Ubuntu 22.04 LTS (30GB)
+3. 记下"外部 IP"
 
-脚本会自动完成：
-
-1. 安装 Xray-core
-2. 开启 BBR 拥塞控制
-3. 生成 UUID 与 Reality 密钥对
-4. 写入配置并启动 Xray（systemd 托管）
-5. 输出 vless 分享链接，并保存到服务器 `/root/vless-link.txt`
-
-## 支持系统
-
-- Ubuntu 20.04 / 22.04 / 24.04
-- Debian 11 / 12
-
-## 防火墙
-
-部署后必须在云控制台放行入站端口（默认 TCP 443）：
-
-- AWS Lightsail：实例页 → Networking → IPv4 Firewall → Add rule
-- AWS EC2：安全组 → 入站规则 → 自定义 TCP → 443
-- GCP：VPC 网络 → 防火墙 → 新建规则
-
-## 客户端
-
-把脚本输出的 `vless://...` 链接导入任一客户端即可：
-
-- Windows: v2rayN
-- Android: v2rayNG
-- iOS: Shadowrocket / sing-box
-- 跨平台: sing-box、clash-verge-rev
-
-## 排障
+命令行方式:
 
 ```bash
-# 查看 Xray 日志
-journalctl -u xray -n 50 --no-pager
+gcloud compute instances create proxy \
+  --zone=us-west1-b \
+  --machine-type=e2-micro \
+  --image-family=ubuntu-2204-lts \
+  --image-project=ubuntu-os-cloud \
+  --tags=proxy-server
 
-# 确认端口监听
-ss -tln | grep 443
-
-# 确认 BBR 生效
-sysctl net.ipv4.tcp_congestion_control
+gcloud compute firewall-rules create allow-proxy-443 \
+  --allow=tcp:443 \
+  --target-tags=proxy-server
 ```
 
-常见问题：
+### AWS EC2
 
-- 客户端连不上：先检查云控制台防火墙是否放行端口
-- 提示证书错误：确认 `sni` 参数与脚本里的 `DEST_HOST` 一致
-- IP 被墙：更换服务器 IP 后重新运行脚本
+1. EC2 -> 启动实例 -> Ubuntu Server 22.04 LTS，类型 `t3.micro` (标注 Free tier)
+2. 密钥对: 新建 RSA `.pem` 并保存好，SSH 登录要用
+3. 安全组: SSH(22) 来源选"我的 IP"; 自定义 TCP 端口 443，来源 `0.0.0.0/0`
+4. 区域建议 `us-west-2` (俄勒冈)
+5. 记下公网 IPv4 地址
 
-## 协议说明
+## 3. 部署 Xray (Reality)
 
-VLESS + XTLS-Vision + Reality，`dest` 指向真实网站（默认 `www.microsoft.com`），
-在没有真实证书的情况下借用目标网站的 TLS 握手特征，抗主动探测。
+SSH 登上服务器后执行:
 
-## 许可
+```bash
+sudo -i
+# Windows 上传脚本: scp -i 你的密钥.pem vps-setup.sh ubuntu@服务器IP:~
+bash vps-setup.sh
+```
 
-MIT
+脚本自动完成: 安装 Xray-core -> 开启 BBR -> 生成 UUID / Reality 密钥 -> 写入配置并启动 -> 打印分享链接。
 
+## 4. 客户端
+
+| 平台 | 软件 |
+| --- | --- |
+| Windows | v2rayN |
+| Android | v2rayNG / sing-box |
+| iOS | Shadowrocket / Streisand |
+| macOS | V2rayXS / clash-verge-rev |
+
+导入脚本输出的 `vless://...` 分享链接即可。
+
+## 5. 排障
+
+- 连不上: 确认云控制台安全组/防火墙已放行 TCP 443; 检查 `systemctl status xray` 与 `ss -tlnp | grep 443`
+- 看日志: `journalctl -u xray -n 50 --no-pager`
+- IP 被墙: AWS/GCP 的 IP 段常被重点关照，换 IP (AWS 换弹性 IP / GCP 换静态 IP) 后重跑脚本
+- 速度慢: `sysctl net.ipv4.tcp_congestion_control` 应返回 `bbr`; 换西海岸机房; 伪装目标可换成同生态站点 (AWS 上用 `www.amazon.com`，即 `DEST_HOST=www.amazon.com`)
+
+## 6. 注意事项
+
+- 遵守中国大陆及服务器所在地的法律法规; 个人自用可以，不要向他人提供或售卖代理服务
+- 遵守 AWS / GCP 服务条款，超出免费额度会产生费用
+- 安全: SSH 仅用密钥登录并关闭密码登录; 只开放必要端口; 定期更新系统
